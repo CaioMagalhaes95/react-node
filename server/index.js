@@ -13,6 +13,12 @@ app.use(cors({ origin: 'http://localhost:5173' }));
 
 app.use(express.json());
 
+// simple request logger to help debug routing issues from the running server
+app.use((req, res, next) => {
+    console.log(`${new Date().toISOString()} ${req.method} ${req.path}`);
+    next();
+});
+
 const { Pool } = pkg
 
 // load .env early so process.env variables are populated
@@ -44,7 +50,7 @@ app.post('/api/post', async (req, res) => {
         if (!name || !email) {
         return res.status(400).json({ error: 'name and email are required' });
         }
-        const sql = 'INSERT INTO form (name, email) VALUES ($1, $2)'
+        const sql = 'INSERT INTO form (name, email) VALUES ($1, $2) RETURNING *'
 
         const {rows} = await pool.query(sql, [name, email])
 
@@ -57,6 +63,26 @@ app.post('/api/post', async (req, res) => {
     }
 })
 
+// Use an explicit delete path to avoid accidental route collisions
+app.delete('/api/delete/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        console.log('Backend received DELETE request for ID:', id);
+        const sql = 'DELETE FROM form WHERE id = $1 RETURNING *';
+        const { rows } = await pool.query(sql, [id]);
+
+        if (!rows || rows.length === 0) {
+            return res.status(404).json({ error: 'Resource not found' });
+        }
+
+        return res.status(200).json(rows[0]);
+    } catch (error) {
+        console.error('Error deleting row:', error);
+        return res.status(500).json({ error: 'Internal Server Error' });
+    }
+
+});
+
 // start the server after routes are defined
 const chosenPort = process.env.PORT || port;
 app.listen(chosenPort, () => {
@@ -68,4 +94,9 @@ app.listen(chosenPort, () => {
     } else {
         console.warn('DATABASE_URL not set — DB queries will fail until set in .env or environment.');
     }
+});
+
+// fallback 404 JSON response (replaces Express default HTML) to make errors clearer
+app.use((req, res) => {
+    res.status(404).json({ error: 'Not found', path: req.path });
 });
